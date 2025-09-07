@@ -191,7 +191,7 @@ class MemePlugin(Star):
             return
         self.memes_disabled_list.remove(meme_name)
         self.config.save_config(replace_config=self.config)
-        yield event.plain_result(f"已禁用meme: {meme_name}")
+        yield event.plain_result(f"已启用meme: {meme_name}")
 
     @filter.command("meme黑名单")
     async def list_supervisors(self, event: AstrMessageEvent):
@@ -241,10 +241,65 @@ class MemePlugin(Star):
             # 模糊匹配：检查关键词是否在消息字符串中
             keyword = next((k for k in self.meme_keywords if k in message_str), None)
         else:
-            # 精确匹配：检查关键词是否等于消息字符串的第一个单词
-            keyword = next(
-                (k for k in self.meme_keywords if k == message_str.split()[0]), None
-            )
+            # === 精确匹配 + 防误触发增强版 ===
+            text_parts = []
+            for seg in event.get_messages():
+                if isinstance(seg, Comp.Plain):
+                    text = seg.text.strip()
+                    if self.prefix and text.startswith(self.prefix):
+                        text = text[len(self.prefix):].strip()
+                    if text:
+                        text_parts.append(text)
+
+            full_text = " ".join(text_parts).strip()
+            if not full_text:
+                return
+
+            # 获取 meme 对象（先通过关键词查找）
+            keyword = next((k for k in self.meme_keywords if k == full_text), None)
+            if not keyword or keyword in self.memes_disabled_list:
+                return
+
+            meme = self._find_meme(keyword)
+            if not meme:
+                return
+
+            # 获取该 meme 所需的文本参数数量
+            # 假设 meme 对象有 params 属性，包含 min_texts / max_texts
+            min_texts = getattr(meme, "params", None)
+            max_texts = getattr(meme, "params", None)
+            # 更常见的是通过 params_type 推断，或直接看是否需要 texts
+            # 这里我们假设可以通过以下方式获取：
+            try:
+                params = meme.params  # 或从 meme_generator 中获取
+                min_texts = params.min_texts
+                max_texts = params.max_texts
+            except AttributeError:
+                # 默认行为：如果没定义，认为可以有文本
+                min_texts = 0
+                max_texts = 1  # 安全起见
+
+            # 如果该 meme 不需要任何文本
+            if min_texts == 0 and max_texts == 0:
+                # 但用户输入了文本 → 检查是否为“安全文本”
+                userText = full_text.replace(keyword, "").strip()  # 去掉 keyword 本身
+                if userText:  # 确实有额外文本
+                    import re
+                    # 安全文本模式1：纯 @QQ号（可带空格）
+                    at_pattern = r"^(@\s*\d+\s*)+$"
+                    # 安全文本模式2：#key value 格式
+                    hash_pattern = r"^(#\S+\s+[^#]+(?:\s+#\S+\s+[^#]+)*)$"
+
+                    is_safe = (
+                            re.match(at_pattern, userText) or
+                            re.match(hash_pattern, userText)
+                    )
+                    if not is_safe:
+                        # 非法文本输入，阻止触发
+                        return
+
+            # ✅ 通过所有检查，可以触发
+            keyword = keyword  # 已赋值
 
         if not keyword or keyword in self.memes_disabled_list:
             return
