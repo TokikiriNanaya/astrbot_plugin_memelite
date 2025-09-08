@@ -241,10 +241,17 @@ class MemePlugin(Star):
             # 模糊匹配：检查关键词是否在消息字符串中
             keyword = next((k for k in self.meme_keywords if k in message_str), None)
         else:
-            # 精确匹配：检查关键词是否等于消息字符串的第一个单词
-            keyword = next(
-                (k for k in self.meme_keywords if k == message_str.split()[0]), None
-            )
+            # 精确匹配：改进版 —— 取第一个“不是 @ 开头”的词
+            words = message_str.split()
+            candidate = None
+            for word in words:
+                stripped = word.strip()
+                if stripped and not stripped.startswith('@'):
+                    candidate = stripped
+                    break
+            if not candidate:
+                return  # 没有有效关键词
+            keyword = next((k for k in self.meme_keywords if k == candidate), None)
 
         if not keyword or keyword in self.memes_disabled_list:
             return
